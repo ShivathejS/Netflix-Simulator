@@ -1,0 +1,54 @@
+spring:
+  application:
+    name: encoding-service
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: encoding-service-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring:
+          json:
+            trusted:
+              packages: "*"
+            use:
+              type:
+                headers: false
+            value:
+              default:
+                type: com.netflix.encodingservice.event.VideoUploadedEvent
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
+server:
+  port: 8083
+
+
+aws:
+  # Local S3Mock defaults. Override these variables for a real AWS S3 bucket.
+  access-key: ${AWS_ACCESS_KEY:local-access-key}
+  secret-key: ${AWS_SECRET_KEY:local-secret-key}
+  region: ${AWS_REGION:us-east-1}
+  s3:
+    endpoint: ${AWS_S3_ENDPOINT:http://localhost:9090}
+    path-style-access: ${AWS_S3_PATH_STYLE_ACCESS:true}
+    bucket-name: ${AWS_BUCKET_NAME:netflix-streaming}
+
+#ffmpeg config
+ffmpeg:
+  path: ${FFMPEG_PATH:ffmpeg}
+
+#Temp directory for encoding
+encoding:
+  base-path: ${TEMP_DIR:./data/encoding}
+  kafka:
+    listener-enabled: ${KAFKA_LISTENER_ENABLED:true}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

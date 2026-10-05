@@ -1,0 +1,23 @@
+# Compiled output
+*.class
+target/
+build/
+out/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Local data / stray files
+data/
+*.mv.db
+Microsoft/
+
+# Logs / OS
+*.log
+Thumbs.db
+
+# Secrets
+.env
+application-local.properties

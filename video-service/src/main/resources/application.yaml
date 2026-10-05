@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: video-service
+
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+  servlet:
+    multipart:
+      max-file-size: 2GB
+      max-request-size: 2GB
+
+
+server:
+  port: 8082
+
+aws:
+  # Local S3Mock defaults. Override these variables for a real AWS S3 bucket.
+  access-key: ${AWS_ACCESS_KEY:local-access-key}
+  secret-key: ${AWS_SECRET_KEY:local-secret-key}
+  region: ${AWS_REGION:us-east-1}
+  s3:
+    endpoint: ${AWS_S3_ENDPOINT:http://localhost:9090}
+    path-style-access: ${AWS_S3_PATH_STYLE_ACCESS:true}
+    bucket-name: ${AWS_BUCKET_NAME:netflix-streaming}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
