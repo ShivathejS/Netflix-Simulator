@@ -5,7 +5,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.util.UriComponentsBuilder;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
@@ -35,9 +38,12 @@ public class StreamingService {
     @Value("${aws.s3.presigned-url-expiry}")
     private long presignedUrlExpiry;
 
+    @Value("${streaming.playlist-base-url}")
+    private String playlistBaseUrl;
+
     //redis key for streaming URLs
 
-    private final static String STREAMING_URL_CACHE_PREFIX = "streaming:url";
+    private static final String STREAMING_URL_CACHE_PREFIX = "streaming:url:";
 
     //Get streaming url for a movie
     //FLOW:
@@ -57,23 +63,24 @@ public class StreamingService {
             return new StreamingResponse(movieId, cachedUrl,
             "1080, 720, 480, 360p", presignedUrlExpiry);
         }
-        //generate presigned url from s3
-        log.info("Generating new presigned URL for movie: {}", movieId);
-        String presignedUrl = generatePresignedUrl(playlistKey);
+        // A master playlist has relative references to child playlists. Serve it
+        // through this API so each child playlist can sign its own segments.
+        log.info("Generating playlist URL for movie: {}", movieId);
+        String playlistUrl = buildPlaylistEndpointUrl(movieId, playlistKey);
 
         // cache in redis for 55mins
         // 5mins less than actual expiry to avoid the edge cases
         redisTemplate.opsForValue().set(
                cacheKey,
-               presignedUrl,
+               playlistUrl,
                 55,
                 TimeUnit.MINUTES
         );
 
-        log.info("Streaming URL generated and cached for movie: {}", movieId);
+        log.info("Streaming playlist URL generated and cached for movie: {}", movieId);
         return new StreamingResponse(
                 movieId,
-                presignedUrl,
+                playlistUrl,
                 "1080, 720, 480, 360p",
                 presignedUrlExpiry
         );
@@ -82,17 +89,23 @@ public class StreamingService {
 
     //this is the key method that makes everything secure.
     public String getSignedPlaylist(String movieId, String playlistPath){
+      String normalizedPath = playlistPath.replace('\\', '/');
+      String expectedPrefix = "encoded/" + movieId + "/";
+      if (!normalizedPath.startsWith(expectedPrefix) || normalizedPath.contains("..")) {
+          throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                  "Playlist path is not valid for this movie");
+      }
       //get base path
-      String basePath = playlistPath.substring(0,
-              playlistPath.lastIndexOf('/')+1);
-      String m3u8Content = readFromS3(playlistPath);
+      String basePath = normalizedPath.substring(0,
+              normalizedPath.lastIndexOf('/')+1);
+      String m3u8Content = readFromS3(normalizedPath);
       //rewrite each line that is a segment or a playlist reference
         String signedContent = rewriteM3u8SignedUrls(
-                m3u8Content, basePath);
+                movieId, m3u8Content, basePath);
         return signedContent;
     }
 
-    private String rewriteM3u8SignedUrls(String m3u8Content,
+    private String rewriteM3u8SignedUrls(String movieId, String m3u8Content,
                                          String basePath){
         StringBuilder rewritten = new StringBuilder();
 
@@ -103,11 +116,13 @@ public class StreamingService {
                 rewritten.append(line).append("\n");
                 continue;
             }
-            //this is a segment or playlist ref
-            // build full s3 key and sign it
+            // Child playlists return to this endpoint so their segment links
+            // are signed too. Video segments can be signed directly.
             String fullKey = basePath + trimmed;
-            String signedUrl = generatePresignedUrl(fullKey);
-            rewritten.append(signedUrl).append("\n");
+            String url = trimmed.endsWith(".m3u8")
+                    ? buildPlaylistEndpointUrl(movieId, fullKey)
+                    : generatePresignedUrl(fullKey);
+            rewritten.append(url).append("\n");
         }
         return rewritten.toString();
     }
@@ -118,11 +133,21 @@ public class StreamingService {
                 .key(s3Key)
                 .build();
 
-        ResponseInputStream<GetObjectResponse> response = s3Client.getObject(request);
+        try (ResponseInputStream<GetObjectResponse> response = s3Client.getObject(request);
+             BufferedReader reader = new BufferedReader(new InputStreamReader(response))) {
+            return reader.lines().collect(Collectors.joining("\n"));
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Playlist not found", e);
+        }
+    }
 
-        return new BufferedReader(new InputStreamReader(response))
-                .lines()
-                .collect(Collectors.joining("\n"));
+    private String buildPlaylistEndpointUrl(String movieId, String playlistKey) {
+        return UriComponentsBuilder.fromUriString(playlistBaseUrl)
+                .pathSegment("api", "v1", "stream", movieId, "playlist")
+                .queryParam("path", playlistKey)
+                .build()
+                .encode()
+                .toUriString();
     }
 
 private String generatePresignedUrl(String key){
@@ -145,7 +170,7 @@ private String generatePresignedUrl(String key){
     public void invalidateCache(String movieId){
         String cacheKey = STREAMING_URL_CACHE_PREFIX + movieId;
         redisTemplate.delete(cacheKey);
-        log.info("Streaming URL cache invalidated for movie: {{}", movieId);
+        log.info("Streaming URL cache invalidated for movie: {}", movieId);
     }
 
 }

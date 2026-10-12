@@ -43,6 +43,8 @@ aws:
     presigned-url-expiry: 60
 
 streaming:
+  # Public base URL used in HLS playlist links. Override behind a gateway/domain.
+  playlist-base-url: ${STREAMING_PLAYLIST_BASE_URL:http://localhost:8084}
   kafka:
     listener-enabled: ${KAFKA_LISTENER_ENABLED:true}
 

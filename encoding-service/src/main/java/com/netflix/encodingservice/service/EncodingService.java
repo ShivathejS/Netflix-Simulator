@@ -186,22 +186,29 @@ public class EncodingService {
     }
     public void uploadEncodedFilesToS3(String localDir, String s3Prefix)throws IOException{
        File directory = new File(localDir);
-       uploadDirectoryToS3(directory, localDir, s3Prefix);
+       Path basePath = directory.toPath().toAbsolutePath().normalize();
+       uploadDirectoryToS3(directory, basePath, s3Prefix);
     }
-    private void uploadDirectoryToS3(File dir, String baseDir, String s3Prefix)throws IOException{
-       for(File file : dir.listFiles()){
+    private void uploadDirectoryToS3(File dir, Path basePath, String s3Prefix)throws IOException{
+       File[] files = dir.listFiles();
+       if (files == null) {
+           throw new IOException("Unable to read encoded output directory: " + dir);
+       }
+
+       for(File file : files){
            if(file.isDirectory()){
-               uploadDirectoryToS3(file, baseDir, s3Prefix);
+               uploadDirectoryToS3(file, basePath, s3Prefix);
            }
            else{
-               String relativePath = file.getAbsolutePath()
-                       .substring(baseDir.length()+1)
-                       .replace("\\", "/");
+               String relativePath = basePath
+                       .relativize(file.toPath().toAbsolutePath().normalize())
+                       .toString()
+                       .replace(File.separatorChar, '/');
 
                String s3Key = s3Prefix + relativePath;
                String contentType =file.getName().endsWith(".m3u8")
-                       ? "application/x-mpegURL"
-                       : "video/MP2T";
+                       ? "application/vnd.apple.mpegurl"
+                       : "video/mp2t";
 
                PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                        .bucket(bucketName)
